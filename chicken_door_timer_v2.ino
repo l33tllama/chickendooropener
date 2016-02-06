@@ -52,7 +52,6 @@
 
 Button menuButton(PIN_ENC_BTN, PULLUP, INVERT, DEBOUNCE_MS);
 
-
 #define MENU_COUNT 2
 
 volatile int f_timer=0;
@@ -88,6 +87,8 @@ bool inSetupMenu = false;
 bool inPreDelayMenu = false;
 bool inPostDelayMenu = false;
 bool setDelayValue = false;
+bool hitBottom = false;
+bool hitTop = false;
 
 unsigned int delay_time_before_sunrise;
 unsigned int delay_time_after_sunset;
@@ -252,8 +253,6 @@ void setup() {
   Serial.print(" : ");
   Serial.print(now.second(), DEC);
   Serial.print("\n");
-
-
   
   // testing..
   checkTime();
@@ -311,6 +310,7 @@ void openDoor(){
     }
     Serial.print(".");
   }
+  hitTop = true;
   Serial.println();
 
   // send low to door open motor pin
@@ -342,6 +342,7 @@ void closeDoor(){
     }
      Serial.print(".");
   }
+  hitBottom = true;
   Serial.println();
 
   // send low to door close motor pin
@@ -362,14 +363,139 @@ void updateDoor(){
   }
 }
 
+// TODO: make piezo beep..
+void beep(int pitch, int duration){
+  
+}
+
+// Alert user to press a button, otherwise the system will try to open/close the door to the proper position
+void waitForUserResetOpen(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Door will ");
+  if(isDayTime && hitBottom){
+    lcd.print("open");
+  } else if(!isDayTime && hitTop){
+    lcd.print("close");
+  }
+  lcd.setCursor(0, 1);
+  lcd.print("Unless press btn");
+  
+  DateTime stopTime = rtc.now();
+  DateTime fixTime;
+  if(isDayTime && hitBottom){
+    fixTime = stopTime + TimeSpan(0, 0, 0, 40);
+  } else if(!isDayTime && hitTop){
+    fixTime = stopTime + TimeSpan(0, 0, 0, 30);
+  }
+  
+  bool pausedForUser = false;
+  
+  // while warning time not run out and user hasn't intervened
+  while(fixTime.unixtime() - rtc.now().unixtime() > 0 && !pausedForUser){
+    menuButton.read();
+    if(menuButton.wasReleased()){
+      pausedForUser = true;
+    }
+    beep(100, 500);
+  }
+
+  // if user wants to operate on door or something.. Leave door open/close (for a fair while)
+  if(pausedForUser){
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Keeping door ");
+    lcd.setCursor(0, 1);
+    if(isDayTime && hitBottom){
+      lcd.print("open");
+    } else if(!isDayTime && hitTop){
+      lcd.print("close");
+    }
+    lcd.print("Press btn");
+
+    // Calculate timeout - we can't pause indefinately just incase of user error!
+    stopTime = rtc.now();
+    bool timeOut = false;
+    
+    if(isDayTime && hitBottom){
+      fixTime = stopTime + TimeSpan(0, 0, 50, 0);
+    } else if(!isDayTime && hitTop){
+      fixTime = stopTime + TimeSpan(0, 0, 30, 0);
+    }
+
+    // while waiting for user
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Waiting for user");
+    lcd.setCursor(0, 1);
+    lcd.print("intervention.");
+    
+    while(!timeOut && pausedForUser){
+      menuButton.read();
+      if(menuButton.wasReleased()){
+        pausedForUser = false;
+      }
+      if(fixTime.unixtime() - rtc.now().unixtime() > 0){
+        timeOut = true;
+      }
+    }
+
+    // If user took way too long, we should carry on! (also could be some real-world issue, eg something knocked limit switch?)
+    if(timeOut){
+      beep(100, 500);
+      beep(100, 500);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Sorry! Have to");
+      lcd.setCursor(0, 1);
+      if(isDayTime && hitBottom){
+        lcd.print("open");
+      } else if(!isDayTime && hitTop){
+        lcd.print("close");
+      }
+      lcd.print(" Door.");
+    } else {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      if(isDayTime && hitBottom){
+        lcd.print("Opening");
+      } else if(!isDayTime && hitTop){
+        lcd.print("Closing");
+      }
+      lcd.print(" door");
+    }
+
+    // finally, open or close the door
+    if(isDayTime && hitBottom){
+      openDoor();
+    } else if(!isDayTime && hitTop){
+      closeDoor();
+    }
+    
+  }
+  
+}
+
 // check limit switches - if door is open when it should be closed
 void checkLimitSwitches(){
-  // if up switch pressed and night time
-  // alert user to press button to keep door open - timeout 15 seconds
-
-  // if down switch and daytime
-  // alert user to press button to keep door closed - timeout 60 seconds
-  
+  // If daytime, only check if door has been manually or accidentally closed
+  if(isDayTime){
+    if(hitBottom){
+      waitForUserResetOpen();
+    }
+    // if down switch pressed and day time
+    if(digitalRead(PIN_LIMSW_DN) == HIGH){
+      hitBottom = true;
+    }
+  } else {
+    if(hitTop){
+      waitForUserResetOpen();
+    }
+    // if up switch is pressed at day time
+    if(digitalRead(PIN_LIMSW_DN) == HIGH){
+      hitBottom = true;
+    }
+  }
 }
 
 void checkTime(){
@@ -501,6 +627,55 @@ void updateLCD(){
   }
 }
 
+// update delay on lcd screen
+void drawDelaySetMenu(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  if(inPreDelayMenu){
+    lcd.print("Pre: ");
+  } else if(inPostDelayMenu){
+    lcd.print("Post: ");
+  }
+  lcd.print(delayVal);
+  lcd.print(" mins");
+}
+
+// update delay value loop - check encoder, if change, update lcd with new val
+void updateDelayValLoop(){
+  encState eState = encoder.read();
+  if (eState == ENC_DEC) {
+    if (delayVal == 0) {
+      delayVal = MAX_DELAY_MINUTES - 1;
+    } else {
+      delayVal = (delayVal - 1);
+    }
+    drawDelaySetMenu();
+  } else if (eState == ENC_INC) {
+    delayVal = (delayVal + 1) % (MAX_DELAY_MINUTES);
+    drawDelaySetMenu();
+  }
+}
+
+// When button clicked, change delay value
+void updateDelaySettings(){
+
+  if(inPreDelayMenu){
+    delayVal = delay_time_before_sunrise;
+  } else if(inPostDelayMenu){
+    delayVal = delay_time_after_sunset;
+  }
+  drawDelaySetMenu();
+  while(!setDelayValue){
+    updateDelayValLoop();
+    menuButton.read();
+    if(menuButton.wasReleased()){
+      // TODO: set delay value in EEPROM
+      setDelayValue = true;
+    }
+  }
+}
+
+// For drawing main menu
 void drawPreDelayMenu(){
   lcd.clear();
   lcd.print("Set delay before");
@@ -530,52 +705,7 @@ void drawSelectedMenu(){
   }
 }
 
-void drawDelaySetMenu(){
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  if(inPreDelayMenu){
-    lcd.print("Pre: ");
-  } else if(inPostDelayMenu){
-    lcd.print("Post: ");
-  }
-  lcd.print(delayVal);
-  lcd.print(" mins");
-  
-}
-
-void updateDelayValLoop(){
-  encState eState = encoder.read();
-  if (eState == ENC_DEC) {
-    if (delayVal == 0) {
-      delayVal = MAX_DELAY_MINUTES - 1;
-    } else {
-      delayVal = (delayVal - 1);
-    }
-    drawDelaySetMenu();
-  } else if (eState == ENC_INC) {
-    delayVal = (delayVal + 1) % (MAX_DELAY_MINUTES);
-    drawDelaySetMenu();
-  }
-}
-
-void updateDelaySettings(){
-
-  if(inPreDelayMenu){
-    delayVal = delay_time_before_sunrise;
-  } else if(inPostDelayMenu){
-    delayVal = delay_time_after_sunset;
-  }
-  drawDelaySetMenu();
-  while(!setDelayValue){
-    updateDelayValLoop();
-    menuButton.read();
-    if(menuButton.wasReleased()){
-      // TODO: set delay value in EEPROM
-      setDelayValue = true;
-    }
-  }
-}
-
+// menu updater. On encoder pos change, draw new menu
 void updateSetupMenu(){
   lcd.setCursor(0, 0);
   encState eState = encoder.read();
@@ -596,6 +726,7 @@ void updateSetupMenu(){
   }
 }
 
+// check if main menu button was pressed. Then run menu routine.
 void checkIfButtonPressed(){
   menuButton.read();
   if(menuButton.wasReleased()){
@@ -615,19 +746,32 @@ void checkIfButtonPressed(){
 
 }
 
-
 void loop() {
+  
+  // check if menu button pressed - enter delay time settings menu
   checkIfButtonPressed();
+  
+  // if in menu, update menu
   if(inSetupMenu){
     updateSetupMenu();
-    
   } else {
+    // main loop - sleep for about 4s (maximum for timer?) then check time and update door
     if(f_timer==1) {
       f_timer = 0;
       Serial.println("Waking from sleep..");
+      
+      // get time from rtc and check if it's day time/night time
       checkTime();
+
+      // check to see if limit switches have been hit when they're not supposed to - could be user intervention
+      checkLimitSwitches();
+      
+      // open/close door if it needs to do so
       updateDoor();
+
+      // show time, sunrise or sunset times
       updateLCD();
+      
       /* Re-enter sleep mode. */
       enterSleep();
     }
