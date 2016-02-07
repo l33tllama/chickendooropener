@@ -50,6 +50,8 @@
 #define PULLUP false
 #define INVERT false
 
+#define PZ_VOL 254
+
 Button menuButton(PIN_ENC_BTN, PULLUP, INVERT, DEBOUNCE_MS);
 
 #define MENU_COUNT 2
@@ -181,14 +183,17 @@ void setupPins(){
   pinMode(PIN_LIMSW_UP, INPUT);
   pinMode(PIN_LIMSW_DN, INPUT);
   pinMode(PIN_ENC_BTN, INPUT);
+  pinMode(PIN_PIEZO, OUTPUT);
 }
 
 void showSplash(){
   // Splash to remind the user who made this!
+  tone(PIN_PIEZO, 1000, 500);
   lcd.print("Door Timer ");
   lcd.setCursor(0, 1);
   lcd.print("by Leo Febey");
   delay(1000);
+  tone(PIN_PIEZO, 500, 500);
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Made at Hobart");
@@ -234,8 +239,6 @@ void setup() {
 
   // read eeprom settings (delays, ?)
   readEEPROM();
-
-  
 
   showSplash();
 
@@ -290,6 +293,7 @@ void enterSleep() {
 }
 
 void openDoor(){
+  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Opening door");
   Serial.println("Opening the door..");
@@ -325,6 +329,7 @@ void openDoor(){
 void closeDoor(){
   // send high to door close motor pin
   digitalWrite(PIN_DOOR_DN, HIGH);
+  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Closing door");
   int timeoutcount = 0;
@@ -363,11 +368,6 @@ void updateDoor(){
   }
 }
 
-// TODO: make piezo beep..
-void beep(int pitch, int duration){
-  
-}
-
 // Alert user to press a button, otherwise the system will try to open/close the door to the proper position
 void waitForUserResetOpen(){
   lcd.clear();
@@ -384,9 +384,9 @@ void waitForUserResetOpen(){
   DateTime stopTime = rtc.now();
   DateTime fixTime;
   if(isDayTime && hitBottom){
-    fixTime = stopTime + TimeSpan(0, 0, 0, 40);
+    fixTime = stopTime + TimeSpan(0, 0, 0, 6);
   } else if(!isDayTime && hitTop){
-    fixTime = stopTime + TimeSpan(0, 0, 0, 30);
+    fixTime = stopTime + TimeSpan(0, 0, 0, 5);
   }
   
   bool pausedForUser = false;
@@ -397,7 +397,9 @@ void waitForUserResetOpen(){
     if(menuButton.wasReleased()){
       pausedForUser = true;
     }
-    beep(100, 500);
+    tone(PIN_PIEZO, 2000, 50);
+    delay(50);
+    tone(PIN_PIEZO, 2000, 50);
   }
 
   // if user wants to operate on door or something.. Leave door open/close (for a fair while)
@@ -442,8 +444,9 @@ void waitForUserResetOpen(){
 
     // If user took way too long, we should carry on! (also could be some real-world issue, eg something knocked limit switch?)
     if(timeOut){
-      beep(100, 500);
-      beep(100, 500);
+      tone(PIN_PIEZO, 2000, 50);
+      delay(50);
+      tone(PIN_PIEZO, 2000, 50);
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("Sorry! Have to");
@@ -464,14 +467,14 @@ void waitForUserResetOpen(){
       }
       lcd.print(" door");
     }
-
-    // finally, open or close the door
-    if(isDayTime && hitBottom){
-      openDoor();
-    } else if(!isDayTime && hitTop){
-      closeDoor();
-    }
-    
+  }
+  // finally, open or close the door
+  if(isDayTime && hitBottom){
+    openDoor();
+    hitBottom = false;
+  } else if(!isDayTime && hitTop){
+    closeDoor();
+    hitTop = false;
   }
   
 }
@@ -480,20 +483,38 @@ void waitForUserResetOpen(){
 void checkLimitSwitches(){
   // If daytime, only check if door has been manually or accidentally closed
   if(isDayTime){
+    Serial.print("Checking if door closed at daytime.");
+    // quickly power motor to check if door is hitting wrong limit switch
+    // if down switch pressed and day time
+    digitalWrite(PIN_DOOR_DN, HIGH);
+    if(digitalRead(PIN_LIMSW_DN) == HIGH){
+      Serial.print("Hit bottom!");
+      hitBottom = true;
+    }
+    delay(1);
+    digitalWrite(PIN_DOOR_DN, LOW);
+    digitalWrite(PIN_DOOR_UP, HIGH);
+    delay(2);
+    digitalWrite(PIN_DOOR_UP, LOW);
     if(hitBottom){
       waitForUserResetOpen();
     }
-    // if down switch pressed and day time
-    if(digitalRead(PIN_LIMSW_DN) == HIGH){
-      hitBottom = true;
-    }
   } else {
+    Serial.print("Checking if door opened at night time.");
+    
+    // if up switch is pressed at day time
+    digitalWrite(PIN_DOOR_UP, HIGH);
+    if(digitalRead(PIN_LIMSW_UP) == LOW){
+      hitTop = true;
+      Serial.print("Hit bottom!");
+    }
+    delay(1);
+    digitalWrite(PIN_DOOR_UP, LOW);
+    digitalWrite(PIN_DOOR_DN, HIGH);
+    delay(2);
+    digitalWrite(PIN_DOOR_DN, LOW);
     if(hitTop){
       waitForUserResetOpen();
-    }
-    // if up switch is pressed at day time
-    if(digitalRead(PIN_LIMSW_DN) == HIGH){
-      hitBottom = true;
     }
   }
 }
@@ -649,9 +670,11 @@ void updateDelayValLoop(){
     } else {
       delayVal = (delayVal - 1);
     }
+    tone(PIN_PIEZO, 100 + delayVal * 12, 25);
     drawDelaySetMenu();
   } else if (eState == ENC_INC) {
     delayVal = (delayVal + 1) % (MAX_DELAY_MINUTES);
+    tone(PIN_PIEZO, 100 + delayVal * 12, 25);
     drawDelaySetMenu();
   }
 }
@@ -669,6 +692,9 @@ void updateDelaySettings(){
     updateDelayValLoop();
     menuButton.read();
     if(menuButton.wasReleased()){
+      tone(PIN_PIEZO, 100 + delayVal * 12, 100);
+      delay(200);
+      tone(PIN_PIEZO, 100 + delayVal * 12, 100);
       // TODO: set delay value in EEPROM
       setDelayValue = true;
     }
@@ -710,6 +736,7 @@ void updateSetupMenu(){
   lcd.setCursor(0, 0);
   encState eState = encoder.read();
   if (eState == ENC_DEC) {
+    tone(PIN_PIEZO, 400, 25);
     if (menuPos == 0) {
       menuPos = MENU_COUNT - 1;
     } else {
@@ -719,6 +746,7 @@ void updateSetupMenu(){
     Serial.print("Menu item: ");
     Serial.println(menuPos);
   } else if (eState == ENC_INC) {
+    tone(PIN_PIEZO, 400, 25);
     menuPos = (menuPos + 1) % (MENU_COUNT);
     Serial.print("Menu item: ");
     Serial.println(menuPos);
@@ -730,6 +758,7 @@ void updateSetupMenu(){
 void checkIfButtonPressed(){
   menuButton.read();
   if(menuButton.wasReleased()){
+    tone(PIN_PIEZO, 1000, 50);
     if(!inSetupMenu){
       lcd.clear();
       inSetupMenu = true;
