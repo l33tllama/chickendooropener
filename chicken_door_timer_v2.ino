@@ -1,5 +1,6 @@
 #include <avr/sleep.h>
 #include <avr/power.h>
+#include <avr/wdt.h>
 
 #include <LiquidCrystal.h>
 #include <Wire.h>
@@ -208,6 +209,9 @@ void setup() {
 
   enableInterrupts();
   setupPins();
+  
+  wdt_disable();
+  
 
   tardis.TimeZone(11 * 60);
   tardis.Position(LATITUDE, LONGITUDE);
@@ -222,7 +226,7 @@ void setup() {
     Serial.println("Couldn't find RTC");
     while (1);
   }
-
+  
   // setup RTC
   if (! rtc.isrunning()) {
     Serial.println("RTC is not running! PANIC!");
@@ -261,6 +265,7 @@ void setup() {
   checkTime();
   //openDoor();
   //closeDoor();
+  wdt_enable(WDTO_4S);
 }
 
 
@@ -305,6 +310,7 @@ void openDoor(){
   // loop until limit switch is hit (also add timeout)
   Serial.print("Waiting for door to open");
   while(digitalRead(PIN_LIMSW_UP) == LOW){
+    wdt_reset();
     delay(DELAY_MS);
     timeoutcount++;
     if(timeoutcount > TIMEOUT_MAX){
@@ -324,6 +330,8 @@ void openDoor(){
   // set door is open bool to true
   doorOpen = true;
 
+  wdt_enable(WDTO_4S);
+
 }
 
 void closeDoor(){
@@ -337,7 +345,7 @@ void closeDoor(){
   // loop until limit switch is hit  (also add timeout)
   Serial.print("Waiting for door to close");
   while(digitalRead(PIN_LIMSW_DN) == LOW){
-
+    wdt_reset();
     delay(DELAY_MS);
     timeoutcount++;
     if(timeoutcount > TIMEOUT_MAX){
@@ -393,6 +401,7 @@ void waitForUserResetOpen(){
   
   // while warning time not run out and user hasn't intervened
   while(fixTime.unixtime() - rtc.now().unixtime() > 0 && !pausedForUser){
+    wdt_reset();
     menuButton.read();
     if(menuButton.wasReleased()){
       pausedForUser = true;
@@ -433,6 +442,7 @@ void waitForUserResetOpen(){
     lcd.print("intervention.");
     
     while(!timeOut && pausedForUser){
+      wdt_reset();
       menuButton.read();
       if(menuButton.wasReleased()){
         pausedForUser = false;
@@ -519,6 +529,7 @@ void checkLimitSwitches(){
   }
 }
 
+// Get time from RTC and calculate sunrise/sunset to display on LCD
 void checkTime(){
   //today =  {now.second(), now.minute(), now.hour(), now.day(), now.month(), now.year() } ;
   // check if it is time to open the door
@@ -689,6 +700,7 @@ void updateDelaySettings(){
   }
   drawDelaySetMenu();
   while(!setDelayValue){
+    wdt_reset();
     updateDelayValLoop();
     menuButton.read();
     if(menuButton.wasReleased()){
@@ -776,6 +788,8 @@ void checkIfButtonPressed(){
 }
 
 void loop() {
+
+  
   
   // check if menu button pressed - enter delay time settings menu
   checkIfButtonPressed();
@@ -805,4 +819,5 @@ void loop() {
       enterSleep();
     }
   }
+  wdt_reset();
 }
