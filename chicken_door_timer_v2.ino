@@ -1,13 +1,26 @@
+/* Chicek door timer (v2)
+ *  By Leo Febey 2016
+ *  leofebey (at) gmail (dot) com
+ *  
+ *  Program that automatically opens and closes a door on sunrise / sunset.
+ *  User can also set a delay before and after sunrise and sunset to 
+ *  ensure chickens (or other animals) are very certainly inside.
+ *  
+ *  Requires Button.h, TimeLord.h, RTClib.h (Adafruit), and included encoder.h
+ */
+
+// TODO: if door didn't close/open properly, get it to try again a few times.
+// TODO: thoroughly read through code to ensure it's all good.k
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
 
 #include <LiquidCrystal.h>
 #include <Wire.h>
+#include <EEPROM.h>
 #include <Button.h>
 #include <TimeLord.h>
 #include "RTClib.h"
-#include <EEPROM.h>
 #include "encoder.h"
 
 // Pins
@@ -50,8 +63,7 @@
 #define DEBOUNCE_MS 20
 #define PULLUP false
 #define INVERT false
-
-#define PZ_VOL 254
+#define DOOR_RETRY_SECONDS 10
 
 Button menuButton(PIN_ENC_BTN, PULLUP, INVERT, DEBOUNCE_MS);
 
@@ -63,8 +75,9 @@ volatile int f_timer=0;
 const int TIMEOUT_MAX = 220;
 const int DELAY_MS = 10;
 const int MAX_DELAY_MINUTES = 100;
-int menuPos = 0;
-int delayVal = 0;
+int menu_pos = 0;
+int delay_val = 0;
+int door_retry_seconds_c = 0;
 
 RTC_DS1307 rtc;
 
@@ -84,14 +97,16 @@ byte sunrise[6];
 byte sunset[6];
 
 // process logic booleans
-bool isDayTime = false;
-bool doorOpen = false;
-bool inSetupMenu = false;
-bool inPreDelayMenu = false;
-bool inPostDelayMenu = false;
-bool setDelayValue = false;
-bool hitBottom = false;
-bool hitTop = false;
+bool is_day_time = false;
+bool door_open = false;
+bool in_setup_menu = false;
+bool in_pre_delay_menu = false;
+bool in_post_delay_menu = false;
+bool set_delay_value = false;
+bool hit_bottom = false;
+bool hit_top = false;
+bool couldnt_close_door = false;
+bool couldnt_open_door = false;
 
 unsigned int delay_time_before_sunrise;
 unsigned int delay_time_after_sunset;
@@ -119,9 +134,7 @@ void readEEPROM() {
   byte sunrise_dt_c_calc = CKSUM_SECRET ^ sunrise_dt_v0;
   sunrise_dt_c_calc ^= sunrise_dt_v1;
 
-  int eepromSuccess = 0x00;
-  
-  //int precalc_sunrise_c = sunrise_dt_c;
+  int eeprom_success = 0x00;
 
   // if checksum mismatch - something went wrong with EEPROM writing. Try to reset 
   if(sunrise_dt_c_calc != sunrise_dt_c){
@@ -137,14 +150,12 @@ void readEEPROM() {
     delay_time_before_sunrise = (SUNRISE_DT_0_V << 4) + SUNRISE_DT_1_V;
   } else {
     delay_time_before_sunrise = (sunrise_dt_v0 << 4) + sunrise_dt_v1;
-    eepromSuccess += 0x01;
+    eeprom_success += 0x01;
   }
 
   // check checksum of sunset time from EEPROM
   byte sunset_dt_c_calc = CKSUM_SECRET ^ sunset_dt_v0;
   sunset_dt_c_calc ^= sunset_dt_v1;
-
-  //int precalc_sunset_c = (int)SUNSET_DT_C_V;
 
   if(sunset_dt_c_calc != sunset_dt_c){
     lcd.clear();
@@ -159,10 +170,10 @@ void readEEPROM() {
     delay_time_after_sunset = (SUNSET_DT_0_V << 4) + SUNSET_DT_1_V;
   } else {
     delay_time_after_sunset = (sunset_dt_v0 << 4) + sunset_dt_v1;
-    eepromSuccess += 0x10;
+    eeprom_success += 0x10;
   }
 
-  if(eepromSuccess == 0x11){
+  if(eeprom_success == 0x11){
     Serial.println("EEPROM read successfully.");
   }
 }
@@ -317,6 +328,7 @@ void enterSleep() {
   power_all_enable();
 }
 
+// Opens the door (with timeout)
 void openDoor(){
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -336,11 +348,15 @@ void openDoor(){
     if(timeoutcount > TIMEOUT_MAX){
       Serial.print("\nERROR! door not closing properly. Check limit switch.\n");
       Serial.print("Pretending that it's closed for now..");
+      couldnt_open_door = true;
       break;
     }
     Serial.print(".");
   }
-  hitTop = true;
+  if(timeoutcount <= TIMEOUT_MAX){
+    couldnt_open_door = false;
+  }
+  hit_top = true;
   Serial.println();
 
   // send low to door open motor pin
@@ -348,10 +364,11 @@ void openDoor(){
 
   Serial.println("Door opened!!");
   // set door is open bool to true
-  doorOpen = true;
+  door_open = true;
 
 }
 
+// Closes the door (with timeout)
 void closeDoor(){
   // send high to door close motor pin
   digitalWrite(PIN_DOOR_DN, HIGH);
@@ -369,29 +386,43 @@ void closeDoor(){
     if(timeoutcount > TIMEOUT_MAX){
       Serial.print("\nERROR! door not opening properly. Check limit switch.\n");
       Serial.print("Pretending that it's open for now..");
+      couldnt_close_door = true;
       break;
     }
      Serial.print(".");
   }
-  hitBottom = true;
+  if(timeoutcount <= TIMEOUT_MAX){
+    couldnt_close_door = false;
+  }
+  hit_bottom = true;
   Serial.println();
 
   // send low to door close motor pin
   digitalWrite(PIN_DOOR_DN, LOW);
   Serial.println("Door closed!!");
   // set door is open bool to false
-  doorOpen = false;
+  door_open = false;
 
 }
 
 void updateDoor(){
-  if(isDayTime && !doorOpen){
+  if(is_day_time && !door_open){
     Serial.print("It's daytime and we are now opening the door!");
     openDoor();
-  } else if (!isDayTime && doorOpen){
+  } else if (!is_day_time && door_open){
     Serial.print("It's night time and we are now closing the door!");
     closeDoor();
   }
+  door_retry_seconds_c += 4;
+  if(door_retry_seconds_c >= DOOR_RETRY_SECONDS){
+    if(couldnt_open_door){
+      openDoor();
+    } else if (couldnt_close_door){
+      closeDoor();
+    }
+    door_retry_seconds_c = 0;
+  }
+  
 }
 
 // Alert user to press a button, otherwise the system will try to open/close the door to the proper position
@@ -399,9 +430,9 @@ void waitForUserResetOpen(){
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Door will ");
-  if(isDayTime && hitBottom){
+  if(is_day_time && hit_bottom){
     lcd.print("open");
-  } else if(!isDayTime && hitTop){
+  } else if(!is_day_time && hit_top){
     lcd.print("close");
   }
   lcd.setCursor(0, 1);
@@ -409,9 +440,9 @@ void waitForUserResetOpen(){
   
   DateTime stopTime = rtc.now();
   DateTime fixTime;
-  if(isDayTime && hitBottom){
+  if(is_day_time && hit_bottom){
     fixTime = stopTime + TimeSpan(0, 0, 0, 6);
-  } else if(!isDayTime && hitTop){
+  } else if(!is_day_time && hit_top){
     fixTime = stopTime + TimeSpan(0, 0, 0, 5);
   }
   
@@ -435,9 +466,9 @@ void waitForUserResetOpen(){
     lcd.setCursor(0, 0);
     lcd.print("Keeping door ");
     lcd.setCursor(0, 1);
-    if(isDayTime && hitBottom){
+    if(is_day_time && hit_bottom){
       lcd.print("open");
-    } else if(!isDayTime && hitTop){
+    } else if(!is_day_time && hit_top){
       lcd.print("close");
     }
     lcd.print("Press btn");
@@ -446,9 +477,9 @@ void waitForUserResetOpen(){
     stopTime = rtc.now();
     bool timeOut = false;
     
-    if(isDayTime && hitBottom){
+    if(is_day_time && hit_bottom){
       fixTime = stopTime + TimeSpan(0, 0, 50, 0);
-    } else if(!isDayTime && hitTop){
+    } else if(!is_day_time && hit_top){
       fixTime = stopTime + TimeSpan(0, 0, 30, 0);
     }
 
@@ -479,30 +510,30 @@ void waitForUserResetOpen(){
       lcd.setCursor(0, 0);
       lcd.print("Sorry! Have to");
       lcd.setCursor(0, 1);
-      if(isDayTime && hitBottom){
+      if(is_day_time && hit_bottom){
         lcd.print("open");
-      } else if(!isDayTime && hitTop){
+      } else if(!is_day_time && hit_top){
         lcd.print("close");
       }
       lcd.print(" Door.");
     } else {
       lcd.clear();
       lcd.setCursor(0, 0);
-      if(isDayTime && hitBottom){
+      if(is_day_time && hit_bottom){
         lcd.print("Opening");
-      } else if(!isDayTime && hitTop){
+      } else if(!is_day_time && hit_top){
         lcd.print("Closing");
       }
       lcd.print(" door");
     }
   }
   // finally, open or close the door
-  if(isDayTime && hitBottom){
+  if(is_day_time && hit_bottom){
     openDoor();
-    hitBottom = false;
-  } else if(!isDayTime && hitTop){
+    hit_bottom = false;
+  } else if(!is_day_time && hit_top){
     closeDoor();
-    hitTop = false;
+    hit_top = false;
   }
   
 }
@@ -510,21 +541,21 @@ void waitForUserResetOpen(){
 // check limit switches - if door is open when it should be closed
 void checkLimitSwitches(){
   // If daytime, only check if door has been manually or accidentally closed
-  if(isDayTime){
+  if(is_day_time){
     Serial.print("Checking if door closed at daytime.");
     // quickly power motor to check if door is hitting wrong limit switch
     // if down switch pressed and day time
     digitalWrite(PIN_DOOR_DN, HIGH);
     if(digitalRead(PIN_LIMSW_DN) == HIGH){
       Serial.print("Hit bottom!");
-      hitBottom = true;
+      hit_bottom = true;
     }
     delay(1);
     digitalWrite(PIN_DOOR_DN, LOW);
     digitalWrite(PIN_DOOR_UP, HIGH);
     delay(2);
     digitalWrite(PIN_DOOR_UP, LOW);
-    if(hitBottom){
+    if(hit_bottom){
       waitForUserResetOpen();
     }
   } else {
@@ -533,7 +564,7 @@ void checkLimitSwitches(){
     // if up switch is pressed at day time
     digitalWrite(PIN_DOOR_UP, HIGH);
     if(digitalRead(PIN_LIMSW_UP) == LOW){
-      hitTop = true;
+      hit_top = true;
       Serial.print("Hit bottom!");
     }
     delay(1);
@@ -541,7 +572,7 @@ void checkLimitSwitches(){
     digitalWrite(PIN_DOOR_DN, HIGH);
     delay(2);
     digitalWrite(PIN_DOOR_DN, LOW);
-    if(hitTop){
+    if(hit_top){
       waitForUserResetOpen();
     }
   }
@@ -578,17 +609,17 @@ void checkTime(){
       Serial.print((int)delta_mins / 60);
       Serial.print(":");
       Serial.println(delta_mins % 60);
-      isDayTime = false;
+      is_day_time = false;
     } else {
       Serial.print("Time until sunset: ");
       Serial.print(-delta_mins / 60);
       Serial.print(":");
       Serial.println(-delta_mins % 60);
-      isDayTime = true;
+      is_day_time = true;
     }
   }
   // get day for tomorrow if the sun has gone down already
-  if(!isDayTime){
+  if(!is_day_time){
     // If in the evening, before the next day
     if(now.hour() > sunset[tl_hour]){
       Serial.println("Checking sunrise for tomorrow..?");
@@ -615,7 +646,7 @@ void checkTime(){
     Serial.print(":");
     Serial.println((int) sunrise[tl_minute]);
     int delta_mins;
-    if(!isDayTime){
+    if(!is_day_time){
       if(evening){
         // get total mins including minutes before midnight
         delta_mins = (24 - now.hour() + sunrise[tl_hour]) * 60 + (sunrise[tl_minute] + (60-now.minute()));
@@ -662,7 +693,7 @@ void updateLCD(){
  tensDigitLCD(now.hour());
  lcd.print(":");
  tensDigitLCD(now.minute());
-  if(isDayTime){
+  if(is_day_time){
     lcd.setCursor(0, 1);
     lcd.print("Sunset:  ");
     tensDigitLCD(sunset[tl_hour]);
@@ -681,35 +712,35 @@ void updateLCD(){
 void drawDelaySetMenu(){
   lcd.clear();
   lcd.setCursor(0, 0);
-  if(inPreDelayMenu){
+  if(in_pre_delay_menu){
     lcd.print("Pre: ");
-  } else if(inPostDelayMenu){
+  } else if(in_post_delay_menu){
     lcd.print("Post: ");
   }
-  lcd.print(delayVal);
+  lcd.print(delay_val);
   lcd.print(" mins");
 }
 
 // update delay value loop - check encoder, if change, update lcd with new val
-void updateDelayValLoop(){
+void updatedelay_valLoop(){
   encState eState = encoder.read();
   if (eState == ENC_DEC) {
-    if (delayVal == 0) {
-      delayVal = MAX_DELAY_MINUTES - 1;
+    if (delay_val == 0) {
+      delay_val = MAX_DELAY_MINUTES - 1;
     } else {
-      delayVal = (delayVal - 1);
+      delay_val = (delay_val - 1);
     }
-    tone(PIN_PIEZO, 100 + delayVal * 12, 25);
+    tone(PIN_PIEZO, 100 + delay_val * 12, 25);
     drawDelaySetMenu();
   } else if (eState == ENC_INC) {
-    delayVal = (delayVal + 1) % (MAX_DELAY_MINUTES);
-    tone(PIN_PIEZO, 100 + delayVal * 12, 25);
+    delay_val = (delay_val + 1) % (MAX_DELAY_MINUTES);
+    tone(PIN_PIEZO, 100 + delay_val * 12, 25);
     drawDelaySetMenu();
   }
 }
 
 // write new delay value to EEPROM (including checksum)
-void setDelayValEEPROM(bool sunrise, int val){
+void setdelay_valEEPROM(bool sunrise, int val){
   int val_l = (val & 0b11110000) >> 4;
   int val_r = val & 0b00001111;
   int checksum = CKSUM_SECRET ^ val_l;
@@ -729,24 +760,24 @@ void setDelayValEEPROM(bool sunrise, int val){
 void updateDelaySettings(){
   // get latest EEPROM values..
   readEEPROM();
-  if(inPreDelayMenu){
-    delayVal = delay_time_before_sunrise;
-  } else if(inPostDelayMenu){
-    delayVal = delay_time_after_sunset;
+  if(in_pre_delay_menu){
+    delay_val = delay_time_before_sunrise;
+  } else if(in_post_delay_menu){
+    delay_val = delay_time_after_sunset;
   }
   drawDelaySetMenu();
-  while(!setDelayValue){
+  while(!set_delay_value){
     wdt_reset();
-    updateDelayValLoop();
+    updatedelay_valLoop();
     menuButton.read();
     if(menuButton.wasReleased()){
-      tone(PIN_PIEZO, 100 + delayVal * 12, 100);
+      tone(PIN_PIEZO, 100 + delay_val * 12, 100);
       delay(200);
-      tone(PIN_PIEZO, 100 + delayVal * 12, 100);
+      tone(PIN_PIEZO, 100 + delay_val * 12, 100);
       // TODO: set delay value in EEPROM
-      setDelayValue = true;
-      bool sunrise = inPreDelayMenu;
-      setDelayValEEPROM(sunrise, delayVal);
+      set_delay_value = true;
+      bool sunrise = in_pre_delay_menu;
+      setdelay_valEEPROM(sunrise, delay_val);
     }
   }
 }
@@ -757,8 +788,8 @@ void drawPreDelayMenu(){
   lcd.print("Set delay before");
   lcd.setCursor(0, 1);
   lcd.print("Sunrise. [1/2]");
-  inPreDelayMenu = true;
-  inPostDelayMenu = false;
+  in_pre_delay_menu = true;
+  in_post_delay_menu = false;
 }
 
 void drawPostDelayMenu(){
@@ -766,18 +797,18 @@ void drawPostDelayMenu(){
   lcd.print("Set delay after");
   lcd.setCursor(0, 1);
   lcd.print("sunset.  [2/2]");
-  inPreDelayMenu = false;
-  inPostDelayMenu = true;
+  in_pre_delay_menu = false;
+  in_post_delay_menu = true;
 }
 
 void drawSelectedMenu(){
   lcd.setCursor(0, 0);
-  if(menuPos == 0){
+  if(menu_pos == 0){
     drawPreDelayMenu();
-    inPreDelayMenu = true;
-  } else if (menuPos == 1){
+    in_pre_delay_menu = true;
+  } else if (menu_pos == 1){
     drawPostDelayMenu();
-    inPostDelayMenu = true;
+    in_post_delay_menu = true;
   }
 }
 
@@ -787,19 +818,19 @@ void updateSetupMenu(){
   encState eState = encoder.read();
   if (eState == ENC_DEC) {
     tone(PIN_PIEZO, 400, 25);
-    if (menuPos == 0) {
-      menuPos = MENU_COUNT - 1;
+    if (menu_pos == 0) {
+      menu_pos = MENU_COUNT - 1;
     } else {
-      menuPos = (menuPos - 1);
+      menu_pos = (menu_pos - 1);
     }
     drawSelectedMenu();
     Serial.print("Menu item: ");
-    Serial.println(menuPos);
+    Serial.println(menu_pos);
   } else if (eState == ENC_INC) {
     tone(PIN_PIEZO, 400, 25);
-    menuPos = (menuPos + 1) % (MENU_COUNT);
+    menu_pos = (menu_pos + 1) % (MENU_COUNT);
     Serial.print("Menu item: ");
-    Serial.println(menuPos);
+    Serial.println(menu_pos);
     drawSelectedMenu();
   }
 }
@@ -810,17 +841,17 @@ void checkIfButtonPressed(){
   if(menuButton.wasReleased()){
     tone(PIN_PIEZO, 1000, 50);
     // if in main menu (date/time)
-    if(!inSetupMenu){
+    if(!in_setup_menu){
       lcd.clear();
-      inSetupMenu = true;
-      inPreDelayMenu = true;
-      inPostDelayMenu = false;
+      in_setup_menu = true;
+      in_pre_delay_menu = true;
+      in_post_delay_menu = false;
       drawPreDelayMenu();
-    } else if (inPreDelayMenu || inPostDelayMenu){
+    } else if (in_pre_delay_menu || in_post_delay_menu){
       Serial.println("drawing menu screen to update delay value");
-      setDelayValue = false;
+      set_delay_value = false;
       updateDelaySettings();
-      inSetupMenu = false;
+      in_setup_menu = false;
     }
   }
 
@@ -832,7 +863,7 @@ void loop() {
   checkIfButtonPressed();
   
   // if in menu, update menu
-  if(inSetupMenu){
+  if(in_setup_menu){
     updateSetupMenu();
   } else {
     // main loop - sleep for about 4s (maximum for timer?) then check time and update door
