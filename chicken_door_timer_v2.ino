@@ -61,7 +61,7 @@ volatile int f_timer=0;
 
 //const int DELAYTIME_SEC = 20;
 const int TIMEOUT_MAX = 220;
-const int DELAY_MS = 100;
+const int DELAY_MS = 10;
 const int MAX_DELAY_MINUTES = 100;
 int menuPos = 0;
 int delayVal = 0;
@@ -96,8 +96,17 @@ bool hitTop = false;
 unsigned int delay_time_before_sunrise;
 unsigned int delay_time_after_sunset;
 
+
+/* Read EEPROM settings
+ * Mainly just delay before/after sunrise/sunset. 
+ * Additional settings may be added later.
+ * Includes checksum verification for if the EEPROM starts to die after a while 
+ * (unlikely but could cause serious havok)
+ *  
+ */
 void readEEPROM() {
 
+  // read eeprom values for sunrise and sunset delays
   byte sunrise_dt_v0 = EEPROM.read(SUNRISE_DT_0_P);
   byte sunrise_dt_v1 = EEPROM.read(SUNRISE_DT_1_P);
   byte sunrise_dt_c  = EEPROM.read(SUNRISE_DT_C_P);
@@ -106,12 +115,16 @@ void readEEPROM() {
   byte sunset_dt_v1 = EEPROM.read(SUNSET_DT_1_P);
   byte sunset_dt_c  = EEPROM.read(SUNSET_DT_C_P);
 
+  // check against checksum that was pre-calculated by hand and saved as a final variable
   byte sunrise_dt_c_calc = CKSUM_SECRET ^ sunrise_dt_v0;
   sunrise_dt_c_calc ^= sunrise_dt_v1;
 
-  int precalc_sunrise_c = SUNRISE_DT_C_V;
+  int eepromSuccess = 0x00;
+  
+  //int precalc_sunrise_c = sunrise_dt_c;
 
-  if(sunrise_dt_c_calc != precalc_sunrise_c){
+  // if checksum mismatch - something went wrong with EEPROM writing. Try to reset 
+  if(sunrise_dt_c_calc != sunrise_dt_c){
     lcd.clear();
     lcd.print("EEPROM checksum");
     lcd.setCursor(0, 1);
@@ -124,14 +137,16 @@ void readEEPROM() {
     delay_time_before_sunrise = (SUNRISE_DT_0_V << 4) + SUNRISE_DT_1_V;
   } else {
     delay_time_before_sunrise = (sunrise_dt_v0 << 4) + sunrise_dt_v1;
+    eepromSuccess += 0x01;
   }
 
+  // check checksum of sunset time from EEPROM
   byte sunset_dt_c_calc = CKSUM_SECRET ^ sunset_dt_v0;
   sunset_dt_c_calc ^= sunset_dt_v1;
 
-  int precalc_sunset_c = (int)SUNSET_DT_C_V;
+  //int precalc_sunset_c = (int)SUNSET_DT_C_V;
 
-  if(sunset_dt_c_calc != precalc_sunset_c){
+  if(sunset_dt_c_calc != sunset_dt_c){
     lcd.clear();
     lcd.print("EEPROM checksum");
     lcd.setCursor(0, 1);
@@ -144,10 +159,15 @@ void readEEPROM() {
     delay_time_after_sunset = (SUNSET_DT_0_V << 4) + SUNSET_DT_1_V;
   } else {
     delay_time_after_sunset = (sunset_dt_v0 << 4) + sunset_dt_v1;
+    eepromSuccess += 0x10;
+  }
+
+  if(eepromSuccess == 0x11){
+    Serial.println("EEPROM read successfully.");
   }
 }
 
-
+// Interrupt routine tat resets the sleep flag
 ISR(TIMER1_OVF_vect)
 {
   /* set the flag. */
@@ -157,6 +177,7 @@ ISR(TIMER1_OVF_vect)
    }
 }
 
+// Set interrupt registers
 void enableInterrupts(){
 
   /* Normal timer operation.*/
@@ -187,6 +208,7 @@ void setupPins(){
   pinMode(PIN_PIEZO, OUTPUT);
 }
 
+// LCD splash (Shouldn't be seen too much hopefully..)
 void showSplash(){
   // Splash to remind the user who made this!
   tone(PIN_PIEZO, 1000, 500);
@@ -204,15 +226,14 @@ void showSplash(){
   lcd.clear();
 }
 
-
 void setup() {
 
   enableInterrupts();
   setupPins();
   
   wdt_disable();
-  
 
+  // setup sunrise/sunset calculator library (so good..) 
   tardis.TimeZone(11 * 60);
   tardis.Position(LATITUDE, LONGITUDE);
 
@@ -222,12 +243,12 @@ void setup() {
   // setup LCD
   lcd.begin(16, 2);
 
+  // setup RTC
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     while (1);
   }
   
-  // setup RTC
   if (! rtc.isrunning()) {
     Serial.println("RTC is not running! PANIC!");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -261,15 +282,14 @@ void setup() {
   Serial.print(now.second(), DEC);
   Serial.print("\n");
   
-  // testing..
+  // Initial time check to start things rolling..
   checkTime();
-  //openDoor();
-  //closeDoor();
+
+  // enable watchdog timer
   wdt_enable(WDTO_4S);
 }
 
-
-
+//
 void enterSleep() {
   set_sleep_mode(SLEEP_MODE_IDLE);
 
@@ -329,8 +349,6 @@ void openDoor(){
   Serial.println("Door opened!!");
   // set door is open bool to true
   doorOpen = true;
-
-  wdt_enable(WDTO_4S);
 
 }
 
@@ -690,9 +708,27 @@ void updateDelayValLoop(){
   }
 }
 
+// write new delay value to EEPROM (including checksum)
+void setDelayValEEPROM(bool sunrise, int val){
+  int val_l = (val & 0b11110000) >> 4;
+  int val_r = val & 0b00001111;
+  int checksum = CKSUM_SECRET ^ val_l;
+  checksum ^= val_r;
+  if(sunrise){
+    EEPROM.write(SUNRISE_DT_0_P, val_l);
+    EEPROM.write(SUNRISE_DT_1_P, val_r);
+    EEPROM.write(SUNRISE_DT_C_P, checksum);
+  } else {
+    EEPROM.write(SUNSET_DT_0_P, val_l);
+    EEPROM.write(SUNSET_DT_1_P, val_r);
+    EEPROM.write(SUNSET_DT_C_P, checksum);
+  }
+}
+
 // When button clicked, change delay value
 void updateDelaySettings(){
-
+  // get latest EEPROM values..
+  readEEPROM();
   if(inPreDelayMenu){
     delayVal = delay_time_before_sunrise;
   } else if(inPostDelayMenu){
@@ -709,6 +745,8 @@ void updateDelaySettings(){
       tone(PIN_PIEZO, 100 + delayVal * 12, 100);
       // TODO: set delay value in EEPROM
       setDelayValue = true;
+      bool sunrise = inPreDelayMenu;
+      setDelayValEEPROM(sunrise, delayVal);
     }
   }
 }
@@ -771,6 +809,7 @@ void checkIfButtonPressed(){
   menuButton.read();
   if(menuButton.wasReleased()){
     tone(PIN_PIEZO, 1000, 50);
+    // if in main menu (date/time)
     if(!inSetupMenu){
       lcd.clear();
       inSetupMenu = true;
@@ -789,8 +828,6 @@ void checkIfButtonPressed(){
 
 void loop() {
 
-  
-  
   // check if menu button pressed - enter delay time settings menu
   checkIfButtonPressed();
   
@@ -820,4 +857,4 @@ void loop() {
     }
   }
   wdt_reset();
-}
+} 
