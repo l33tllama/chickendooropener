@@ -1,4 +1,4 @@
-/* Chicek door timer (v2)
+/*  Chicken door timer (v2)
  *  By Leo Febey 2016
  *  leofebey (at) gmail (dot) com
  *  
