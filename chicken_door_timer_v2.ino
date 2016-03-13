@@ -563,7 +563,7 @@ void checkLimitSwitches(){
     
     // if up switch is pressed at day time
     digitalWrite(PIN_DOOR_UP, HIGH);
-    if(digitalRead(PIN_LIMSW_UP) == LOW){
+    if(digitalRead(PIN_LIMSW_UP) == HIGH){
       hit_top = true;
       Serial.print("Hit bottom!");
     }
