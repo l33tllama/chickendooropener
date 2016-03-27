@@ -9,7 +9,6 @@
  *  Requires Button.h, TimeLord.h, RTClib.h (Adafruit), and included encoder.h
  */
 
-// TODO: if door didn't close/open properly, get it to try again a few times.
 // TODO: thoroughly read through code to ensure it's all good.k
 #include <avr/sleep.h>
 #include <avr/power.h>
