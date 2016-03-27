@@ -9,7 +9,7 @@
  *  Requires Button.h, TimeLord.h, RTClib.h (Adafruit), and included encoder.h
  */
 
-// TODO: thoroughly read through code to ensure it's all good.k
+// TODO: thoroughly read through code to ensure it's all good.
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
