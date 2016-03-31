@@ -30,8 +30,6 @@
 #define DELAY_MS 10
 #define MAX_DELAY_MINUTES 100
 #define DOOR_RETRY_SECONDS 10
-#define MAX_TIMEDELTA_MINS 240
-#define MIN_TIMEDELTA_MINS -240
 
 // Pins
 #define PIN_ENC_A     7
@@ -790,18 +788,14 @@ void updateDelayLoop(){
 }
 
 // read encoder and update time delta value on LCD
-byte updatetime_valLoop(byte prev){
+char updatetime_valLoop(char prev){
   encState eState = encoder.read();
   if (eState == ENC_DEC) {
-    if (prev < MIN_TIMEDELTA_MINS) {
-      prev = MAX_TIMEDELTA_MINS;
-    } else {
-      prev = (prev - 1);
-    }
+    prev--;
     tone(PIN_PIEZO, 100 + prev * 12, 25);
     drawAdjustTime(prev);
   } else if (eState == ENC_INC) {
-    prev = (prev + 1) % (MAX_TIMEDELTA_MINS);
+    prev++;
     tone(PIN_PIEZO, 100 + prev * 12, 25);
     drawAdjustTime(prev);
   }
@@ -813,7 +807,7 @@ void adjustTimeLoop(){
   now = rtc.now();
   drawAdjustTime(0);
   bool set_time_dt_val = false;
-  byte deltaTimeMins = 0;
+  char deltaTimeMins = 0;
   while(!set_time_dt_val){
     wdt_reset();
     deltaTimeMins = updatetime_valLoop(deltaTimeMins);
@@ -838,13 +832,10 @@ void drawAdjustTime(char delta){
   lcd.print(":");
   tensDigitLCD(now.minute());
   lcd.setCursor(0, 1);
-  if(delta < 0){
-    lcd.print("-");
-  } else if (delta > 0){
+  if (delta > 0){
     lcd.print("+");
   }
-  lcd.print(" ");
-  lcd.print((char)delta);
+  lcd.print((int)delta);
   lcd.print(" mins.");
 }
 
@@ -881,9 +872,9 @@ void drawTimeOption(){
 // delay adjust menu option
 void drawDelayOption(){
   lcd.clear();
-  lcd.print("Set pre/post delays");
+  lcd.print("Set pre/post");
   lcd.setCursor(0, 1);
-  lcd.print("[2/2]");
+  lcd.print("delays [2/2]");
   in_delay_adj_menu = true;
   in_time_adj_menu = false;
 }
@@ -900,9 +891,9 @@ void drawSelectedMenu(){
     }
   } else if (menu_pos == 1){
     if(!in_options_menu){
-      drawDelayOption();
-    } else {
       drawPostDelayMenu();
+    } else {
+      drawDelayOption();
       //in_post_delay_menu = true;
     }
   }
