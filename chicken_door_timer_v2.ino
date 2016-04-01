@@ -22,6 +22,24 @@
 #include "RTClib.h"
 #include "encoder.h"
 
+//#define DEBUG_EN
+#ifdef DEBUG_EN
+  #define DEBUG(c) Serial.print(c);
+  #define DEBUGLN(c) Serial.println(c);
+#else
+  #define DEBUG(c) ;
+  #define DEBUGLN(c) ;
+#endif
+
+#define ERR_EN
+#ifdef ERR_EN
+  #define ERR(c) Serial.print(c);
+  #define ERRLN(c) Serial.println(c);
+#else
+  #define ERR(c) ;
+  #define ERRLN(c) ;
+#endif
+
 #define LATITUDE -42.9166667
 #define LONGITUDE 147.3333282
 
@@ -72,6 +90,7 @@
 #define INVERT false
 
 #define MENU_COUNT 2
+
 
 volatile byte f_timer=0;
 
@@ -143,11 +162,11 @@ void readEEPROM() {
     lcd.print("EEPROM checksum");
     lcd.setCursor(0, 1);
     lcd.print("error :(");
-    Serial.println("EEPROM checksum error - Writing defeault values for sunrise delay.");
+    ERRLN("EEPROM checksum error - Writing defeault values for sunrise delay.");
     EEPROM.write(SUNRISE_DT_0_P, SUNRISE_DT_0_V);
     EEPROM.write(SUNRISE_DT_1_P, SUNRISE_DT_1_V);
     EEPROM.write(SUNRISE_DT_C_P, SUNRISE_DT_C_V);
-    Serial.println("Done.");
+    DEBUGLN("Done.");
     delay_time_before_sunrise = (SUNRISE_DT_0_V << 4) + SUNRISE_DT_1_V;
   } else {
     delay_time_before_sunrise = (sunrise_dt_v0 << 4) + sunrise_dt_v1;
@@ -163,11 +182,11 @@ void readEEPROM() {
     lcd.print("EEPROM checksum");
     lcd.setCursor(0, 1);
     lcd.print("error :(");
-    Serial.println("Writing default values for sunset delay.");
+    DEBUGLN("Writing default values for sunset delay.");
     EEPROM.write(SUNSET_DT_0_P, SUNSET_DT_0_V);
     EEPROM.write(SUNSET_DT_1_P, SUNSET_DT_1_V);
     EEPROM.write(SUNSET_DT_C_P, SUNSET_DT_C_V);
-    Serial.println("Done.");
+    DEBUGLN("Done.");
     delay_time_after_sunset = (SUNSET_DT_0_V << 4) + SUNSET_DT_1_V;
   } else {
     delay_time_after_sunset = (sunset_dt_v0 << 4) + sunset_dt_v1;
@@ -175,7 +194,9 @@ void readEEPROM() {
   }
 
   if(eeprom_success == 0x11){
-    Serial.println("EEPROM read successfully.");
+    DEBUGLN("EEPROM read successfully.");
+  } else{
+    ERRLN("Error reading EEPROM!");
   }
 }
 
@@ -257,12 +278,12 @@ void setup() {
 
   // setup RTC
   if (! rtc.begin()) {
-    Serial.println("Couldn't find RTC");
+    ERRLN("Couldn't find RTC");
     while (1);
   }
   
   if (! rtc.isrunning()) {
-    Serial.println("RTC is not running! PANIC!");
+    ERRLN("RTC is not running! PANIC!");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
@@ -279,7 +300,7 @@ void setup() {
 
   showSplash();
 
-  // testing..
+  /* testing..
   Serial.print("Date: ");
   Serial.print(now.day());
   Serial.print(" : ");
@@ -292,7 +313,7 @@ void setup() {
   Serial.print(now.minute(), DEC);
   Serial.print(" : ");
   Serial.print(now.second(), DEC);
-  Serial.print("\n");
+  Serial.print("\n"); */
   
   // Initial time check to start things rolling..
   checkTime();
@@ -334,36 +355,36 @@ void openDoor(){
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Opening door");
-  Serial.println("Opening the door..");
+  DEBUGLN("Opening the door..");
   // send high to door open motor pin
   digitalWrite(PIN_DOOR_UP, HIGH);
 
   byte timeoutcount = 0;
 
   // loop until limit switch is hit (also add timeout)
-  Serial.print("Waiting for door to open");
+  DEBUGLN("Waiting for door to open");
   while(digitalRead(PIN_LIMSW_UP) == LOW){
     wdt_reset();
     delay(DELAY_MS);
     timeoutcount++;
     if(timeoutcount > TIMEOUT_MAX){
-      Serial.print("\nERROR! door not closing properly. Check limit switch.\n");
-      Serial.print("Pretending that it's closed for now..");
+      ERRLN("\nERROR! door not closing properly. Check limit switch.\n");
+      ERRLN("Pretending that it's closed for now..");
       couldnt_open_door = true;
       break;
     }
-    Serial.print(".");
+    DEBUG(".");
   }
   if(timeoutcount <= TIMEOUT_MAX){
     couldnt_open_door = false;
   }
   hit_top = true;
-  Serial.println();
+  DEBUGLN();
 
   // send low to door open motor pin
   digitalWrite(PIN_DOOR_UP, LOW);
 
-  Serial.println("Door opened!!");
+  DEBUGLN("Door opened!!");
   // set door is open bool to true
   door_open = true;
 
@@ -379,28 +400,28 @@ void closeDoor(){
   byte timeoutcount = 0;
 
   // loop until limit switch is hit  (also add timeout)
-  Serial.print("Waiting for door to close");
+  DEBUGLN("Waiting for door to close");
   while(digitalRead(PIN_LIMSW_DN) == LOW){
     wdt_reset();
     delay(DELAY_MS);
     timeoutcount++;
     if(timeoutcount > TIMEOUT_MAX){
-      Serial.print("\nERROR! door not opening properly. Check limit switch.\n");
-      Serial.print("Pretending that it's open for now..");
+      ERR("\nERROR! door not opening properly. Check limit switch.\n");
+      ERRLN("Pretending that it's open for now..");
       couldnt_close_door = true;
       break;
     }
-     Serial.print(".");
+     DEBUG(".");
   }
   if(timeoutcount <= TIMEOUT_MAX){
     couldnt_close_door = false;
   }
   hit_bottom = true;
-  Serial.println();
+  DEBUGLN();
 
   // send low to door close motor pin
   digitalWrite(PIN_DOOR_DN, LOW);
-  Serial.println("Door closed!!");
+  DEBUGLN("Door closed!!");
   // set door is open bool to false
   door_open = false;
 
@@ -408,10 +429,10 @@ void closeDoor(){
 
 void updateDoor(){
   if(is_day_time && !door_open){
-    Serial.print("It's daytime and we are now opening the door!");
+    DEBUGLN("It's daytime and we are now opening the door!");
     openDoor();
   } else if (!is_day_time && door_open){
-    Serial.print("It's night time and we are now closing the door!");
+    DEBUGLN("It's night time and we are now closing the door!");
     closeDoor();
   }
   door_retry_seconds_c += 4;
@@ -543,12 +564,12 @@ void waitForUserResetOpen(){
 void checkLimitSwitches(){
   // If daytime, only check if door has been manually or accidentally closed
   if(is_day_time){
-    Serial.print("Checking if door closed at daytime.");
+    DEBUGLN("Checking if door closed at daytime.");
     // quickly power motor to check if door is hitting wrong limit switch
     // if down switch pressed and day time
     digitalWrite(PIN_DOOR_DN, HIGH);
     if(digitalRead(PIN_LIMSW_DN) == HIGH){
-      Serial.print("Hit bottom!");
+      DEBUGLN("Hit bottom!");
       hit_bottom = true;
     }
     delay(1);
@@ -560,13 +581,13 @@ void checkLimitSwitches(){
       waitForUserResetOpen();
     }
   } else {
-    Serial.print("Checking if door opened at night time.");
+    DEBUGLN("Checking if door opened at night time.");
     
     // if up switch is pressed at day time
     digitalWrite(PIN_DOOR_UP, HIGH);
     if(digitalRead(PIN_LIMSW_UP) == HIGH){
       hit_top = true;
-      Serial.print("Hit bottom!");
+      DEBUGLN("Hit bottom!");
     }
     delay(1);
     digitalWrite(PIN_DOOR_UP, LOW);
@@ -601,32 +622,39 @@ void checkTime(){
   bool evening = false;
   if (tardis.SunSet(sunset)) // if the sun will set today (it might not, in the [ant]arctic)
   {
+#ifdef DEBUG_EN
     Serial.print("Sunset: ");
     Serial.print((int) sunset[tl_hour]);
     Serial.print(":");
     Serial.println((int) sunset[tl_minute]);
+#endif    
 
     char delta_mins = (now.hour() * 60 - sunset[tl_hour] * 60) + now.minute() - sunset[tl_minute];
 
     if(delta_mins > 0){
+#ifdef DEBUG_EN      
       Serial.print("Time after sunset: ");
       Serial.print((int)delta_mins / 60);
       Serial.print(":");
       Serial.println(delta_mins % 60);
+#endif      
       is_day_time = false;
     } else {
+#ifdef DEBUG_EN      
       Serial.print("Time until sunset: ");
       Serial.print(-delta_mins / 60);
       Serial.print(":");
       Serial.println(-delta_mins % 60);
+#endif      
       is_day_time = true;
     }
+
   }
   // get day for tomorrow if the sun has gone down already
   if(!is_day_time){
     // If in the evening, before the next day
     if(now.hour() > sunset[tl_hour]){
-      Serial.println("Checking sunrise for tomorrow..?");
+      DEBUGLN("Checking sunrise for tomorrow..?");
       // get tomorrow's sunrise
       DateTime tomorrow = now + TimeSpan(1, 0, 0, 0);
       sunrise[0] = tomorrow.second();
@@ -645,10 +673,12 @@ void checkTime(){
     //DateTime midnight(now.year(), now.month(), now.day(), 0, 0, 0);
     //DateTime now_plus_sunrise = now - (sunrise_dt - midnight);
 
+#ifdef DEBUG_EN
     Serial.print("Sunrise: ");
     Serial.print((int) sunrise[tl_hour]);
     Serial.print(":");
     Serial.print((int) sunrise[tl_minute]);
+#endif
     char delta_mins;
     if(!is_day_time){
       if(evening){
@@ -662,20 +692,21 @@ void checkTime(){
       // time after sunrise - will be negative so below can say time after sunrise
       delta_mins = (sunrise[tl_hour] * 60 - now.hour() * 60) + sunrise[tl_minute] - now.minute();
     }
-
+#ifdef DEBUG_EN
     if(delta_mins < 0){
       Serial.print("Time after sunrise: ");
       Serial.print((int)-delta_mins / 60);
       Serial.print(":");
       Serial.println(-delta_mins % 60);
-    } else {
+    } else {     
       Serial.print("Time until sunrise: ");
       Serial.print(delta_mins / 60);
       Serial.print(":");
       Serial.println(delta_mins % 60);
     }
+#endif
   }
-  Serial.println();
+  DEBUGLN();
 
 }
 
@@ -911,13 +942,13 @@ void updateSetupMenu(){
       menu_pos = (menu_pos - 1);
     }
     drawSelectedMenu();
-    Serial.print("Menu item: ");
-    Serial.println(menu_pos);
+    DEBUG("Menu item: ");
+    DEBUGLN(menu_pos);
   } else if (eState == ENC_INC) {
     tone(PIN_PIEZO, 400, 25);
     menu_pos = (menu_pos + 1) % (MENU_COUNT);
-    Serial.print("Menu item: ");
-    Serial.println(menu_pos);
+    DEBUG("Menu item: ");
+    DEBUGLN(menu_pos);
     drawSelectedMenu();
   }
 }
@@ -939,16 +970,16 @@ void checkIfButtonPressed(){
     } else if(in_delay_adj_menu){ /* user chose delay adjustion - draw first menu, set pre-delay */
       in_main_menu = false;
       in_delay_adj_menu = false;
-      Serial.println("Entering delay adjust options menu.");
+      DEBUGLN("Entering delay adjust options menu.");
       drawPreDelayMenu();
     } else if (in_time_adj_menu){ /* user chose time adjustion - run time adjust loop */
       in_main_menu = false;
       in_time_adj_menu = false;
-      Serial.println("Entering time adjust options menu.");
+      DEBUGLN("Entering time adjust options menu.");
       adjustTimeLoop();
       in_options_menu = false;
     } else if (in_pre_delay_menu || in_post_delay_menu){ /* user chose pre/post delay - run delay adjust loop */
-      Serial.println("drawing menu screen to update delay value");
+      DEBUGLN("drawing menu screen to update delay value");
       
       updateDelayLoop();
       in_options_menu = false;
@@ -969,7 +1000,7 @@ void loop() {
     // main loop - sleep for about 4s (maximum for timer?) then check time and update door
     if(f_timer==1) {
       f_timer = 0;
-      Serial.println("Waking from sleep..");
+      DEBUGLN("Waking from sleep..");
       
       // get time from rtc and check if it's day time/night time
       checkTime();
