@@ -5,7 +5,7 @@ Encoder::Encoder(){
   
 }
 
-Encoder::Encoder(unsigned int enc_a_pin, unsigned int enc_b_pin, unsigned int enc_btn_pin){
+Encoder::Encoder(char enc_a_pin, char enc_b_pin, char enc_btn_pin){
   // setup rotary encoder
   pinMode(enc_a_pin, INPUT);
   pinMode(enc_b_pin, INPUT);

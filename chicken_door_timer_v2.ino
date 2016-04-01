@@ -22,7 +22,7 @@
 #include "RTClib.h"
 #include "encoder.h"
 
-//#define DEBUG_EN
+#define DEBUG_EN
 #ifdef DEBUG_EN
   #define DEBUG(c) Serial.print(c);
   #define DEBUGLN(c) Serial.println(c);
@@ -607,7 +607,6 @@ void checkTime(){
 
   byte today[6];
 
-
   now = rtc.now();
   today[0] = now.second();
   today[1] = now.minute();
@@ -810,7 +809,6 @@ void updateDelayLoop(){
       tone(PIN_PIEZO, 100 + delay_val * 12, 100);
       delay(200);
       tone(PIN_PIEZO, 100 + delay_val * 12, 100);
-      // TODO: set delay value in EEPROM
       set_delay_value = true;
       bool sunrise = in_pre_delay_menu;
       setdelay_valEEPROM(sunrise, delay_val);
@@ -823,15 +821,21 @@ char updatetime_valLoop(char prev){
   encState eState = encoder.read();
   if (eState == ENC_DEC) {
     prev--;
-    tone(PIN_PIEZO, 100 + prev * 12, 25);
+    tone(PIN_PIEZO, 300 + prev * 12, 25);
     drawAdjustTime(prev);
   } else if (eState == ENC_INC) {
     prev++;
-    tone(PIN_PIEZO, 100 + prev * 12, 25);
+    tone(PIN_PIEZO, 300 + prev * 12, 25);
     drawAdjustTime(prev);
   }
   return prev;
 }
+
+inline void adjustTimeMins(char mins){
+  DateTime adjusted(rtc.now() + TimeSpan(0, 0, mins, 0));
+  rtc.adjust(adjusted);
+}
+
 
 // adjusting the time
 void adjustTimeLoop(){
@@ -844,13 +848,11 @@ void adjustTimeLoop(){
     deltaTimeMins = updatetime_valLoop(deltaTimeMins);
     menuButton.read();
     if(menuButton.wasReleased()){
-      tone(PIN_PIEZO, 500, 100);
+      tone(PIN_PIEZO, 300 + deltaTimeMins * 12, 100);
       delay(200);
-      tone(PIN_PIEZO, 500, 100);
-      set_time_dt_val = true;
-      
-      // todo: set time
-      
+      tone(PIN_PIEZO, 300 + deltaTimeMins * 12, 100);
+      adjustTimeMins(deltaTimeMins);
+      set_time_dt_val = true;      
     }
   }
   

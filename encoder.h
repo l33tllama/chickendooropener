@@ -10,18 +10,18 @@ class Encoder{
 
 private:
 
-  int encoderPos;
-  int lastEncoderPos;
-  unsigned int encoderPinALast;
-  unsigned int n;
-  unsigned int _enc_a_pin;
-  unsigned int _enc_b_pin;
-  unsigned int _enc_btn_pin;
+  char encoderPos;
+  char lastEncoderPos;
+  char encoderPinALast;
+  char n;
+  char _enc_a_pin;
+  char _enc_b_pin;
+  char _enc_btn_pin;
 
 public:
   Encoder();
 
-  Encoder(unsigned int enc_a_pin, unsigned int enc_b_pin, unsigned int enc_btn_pin);
+  Encoder(char enc_a_pin, char enc_b_pin, char enc_btn_pin);
 
   encState read();
   
