@@ -13,7 +13,6 @@
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
-#include <stdint.h>
 
 #include <LiquidCrystal.h>
 #include <Wire.h>
@@ -74,7 +73,7 @@
 
 #define MENU_COUNT 2
 
-volatile char f_timer=0;
+volatile byte f_timer=0;
 
 char menu_pos = 0;
 byte delay_val = 0;
@@ -99,6 +98,7 @@ byte sunset[6];
 bool is_day_time = false;
 bool door_open = false;
 bool in_options_menu = false;
+bool in_main_menu = false;
 bool in_pre_delay_menu = false;
 bool in_post_delay_menu = false;
 bool in_time_adj_menu = false;
@@ -338,7 +338,7 @@ void openDoor(){
   // send high to door open motor pin
   digitalWrite(PIN_DOOR_UP, HIGH);
 
-  char timeoutcount = 0;
+  byte timeoutcount = 0;
 
   // loop until limit switch is hit (also add timeout)
   Serial.print("Waiting for door to open");
@@ -376,7 +376,7 @@ void closeDoor(){
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Closing door");
-  char timeoutcount = 0;
+  byte timeoutcount = 0;
 
   // loop until limit switch is hit  (also add timeout)
   Serial.print("Waiting for door to close");
@@ -604,9 +604,9 @@ void checkTime(){
     Serial.print("Sunset: ");
     Serial.print((int) sunset[tl_hour]);
     Serial.print(":");
-    Serial.println((char) sunset[tl_minute]);
+    Serial.println((int) sunset[tl_minute]);
 
-    byte delta_mins = (now.hour() * 60 - sunset[tl_hour] * 60) + now.minute() - sunset[tl_minute];
+    char delta_mins = (now.hour() * 60 - sunset[tl_hour] * 60) + now.minute() - sunset[tl_minute];
 
     if(delta_mins > 0){
       Serial.print("Time after sunset: ");
@@ -649,7 +649,7 @@ void checkTime(){
     Serial.print((int) sunrise[tl_hour]);
     Serial.print(":");
     Serial.print((int) sunrise[tl_minute]);
-    byte delta_mins;
+    char delta_mins;
     if(!is_day_time){
       if(evening){
         // get total mins including minutes before midnight
@@ -679,7 +679,7 @@ void checkTime(){
 
 }
 
-void tensDigitLCD(char digit){
+void tensDigitLCD(byte digit){
   if(digit / 10 < 1){
     lcd.print('0');
   }
@@ -744,10 +744,10 @@ void updatedelay_valLoop(){
 }
 
 // write new delay value to EEPROM (including checksum)
-void setdelay_valEEPROM(bool sunrise, char val){
-  char val_l = (val & 0b11110000) >> 4;
-  char val_r = val & 0b00001111;
-  char checksum = CKSUM_SECRET ^ val_l;
+void setdelay_valEEPROM(bool sunrise, byte val){
+  byte val_l = (val & 0b11110000) >> 4;
+  byte val_r = val & 0b00001111;
+  byte checksum = CKSUM_SECRET ^ val_l;
   checksum ^= val_r;
   if(sunrise){
     EEPROM.write(SUNRISE_DT_0_P, val_l);
@@ -826,7 +826,7 @@ void adjustTimeLoop(){
 }
 
 // draw time adjust screen on LCD
-void drawAdjustTime(char delta){
+inline void drawAdjustTime(char delta){
   lcd.clear();
   tensDigitLCD(now.hour());
   lcd.print(":");
@@ -840,7 +840,7 @@ void drawAdjustTime(char delta){
 }
 
 // pre/post selection menu 1 - before sunrise
-void drawPreDelayMenu(){
+inline void drawPreDelayMenu(){
   lcd.clear();
   lcd.print("Set delay before");
   lcd.setCursor(0, 1);
@@ -850,7 +850,7 @@ void drawPreDelayMenu(){
 }
 
 // pre/post selection menu - after sunset
-void drawPostDelayMenu(){
+inline void drawPostDelayMenu(){
   lcd.clear();
   lcd.print("Set delay after");
   lcd.setCursor(0, 1);
@@ -860,7 +860,7 @@ void drawPostDelayMenu(){
 }
 
 // time adjust menu option
-void drawTimeOption(){
+inline void drawTimeOption(){
   lcd.clear();
   lcd.print("Adjust time by");
   lcd.setCursor(0, 1);
@@ -870,7 +870,7 @@ void drawTimeOption(){
 }
 
 // delay adjust menu option
-void drawDelayOption(){
+inline void drawDelayOption(){
   lcd.clear();
   lcd.print("Set pre/post");
   lcd.setCursor(0, 1);
@@ -883,14 +883,14 @@ void drawDelayOption(){
 void drawSelectedMenu(){
   lcd.setCursor(0, 0);
   if(menu_pos == 0){
-    if(!in_options_menu){
+    if(!in_main_menu){
       drawPreDelayMenu();
       //in_pre_delay_menu = true;
     } else {
       drawTimeOption();
     }
   } else if (menu_pos == 1){
-    if(!in_options_menu){
+    if(!in_main_menu){
       drawPostDelayMenu();
     } else {
       drawDelayOption();
@@ -930,19 +930,26 @@ void checkIfButtonPressed(){
     // if in main menu (date/time) - not in options yet
     if(!in_options_menu){
       in_options_menu = true;
+      in_main_menu = true;
       // show options menu
       lcd.clear();
       // draw first option of options menu - adjust time
       drawTimeOption();
       
     } else if(in_delay_adj_menu){ /* user chose delay adjustion - draw first menu, set pre-delay */
+      in_main_menu = false;
+      in_delay_adj_menu = false;
+      Serial.println("Entering delay adjust options menu.");
       drawPreDelayMenu();
-      in_options_menu = false;
     } else if (in_time_adj_menu){ /* user chose time adjustion - run time adjust loop */
+      in_main_menu = false;
+      in_time_adj_menu = false;
+      Serial.println("Entering time adjust options menu.");
       adjustTimeLoop();
       in_options_menu = false;
     } else if (in_pre_delay_menu || in_post_delay_menu){ /* user chose pre/post delay - run delay adjust loop */
       Serial.println("drawing menu screen to update delay value");
+      
       updateDelayLoop();
       in_options_menu = false;
     } 
@@ -955,7 +962,7 @@ void loop() {
   // check if menu button pressed - enter delay time settings menu
   checkIfButtonPressed();
   
-  // if in menu, update menu
+  // if in a menu, update menu
   if(in_options_menu){
     updateSetupMenu();
   } else {
