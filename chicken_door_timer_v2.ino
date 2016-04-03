@@ -21,24 +21,8 @@
 #include <TimeLord.h>
 #include "RTClib.h"
 #include "encoder.h"
-
-#define DEBUG_EN
-#ifdef DEBUG_EN
-  #define DEBUG(c) Serial.print(c);
-  #define DEBUGLN(c) Serial.println(c);
-#else
-  #define DEBUG(c) ;
-  #define DEBUGLN(c) ;
-#endif
-
-#define ERR_EN
-#ifdef ERR_EN
-  #define ERR(c) Serial.print(c);
-  #define ERRLN(c) Serial.println(c);
-#else
-  #define ERR(c) ;
-  #define ERRLN(c) ;
-#endif
+//#define DEBUG_EN
+#include "main.h"
 
 #define LATITUDE -42.9166667
 #define LONGITUDE 147.3333282
@@ -66,31 +50,7 @@
 #define DEFAULT_SUNRISE_PD_MINS 20
 #define DEFAULT_SUNSET_D_MINS   30
 
-#define CKSUM_SECRET    0b0111
-// time delay before sunrise (in case chickens want to get out early)
-// default - 20 - 0001 0100 - cksum - 0010
-#define SUNRISE_DT_0_P  0b0010
-#define SUNRISE_DT_1_P  0b0011
-#define SUNRISE_DT_C_P  0b0100
-#define SUNRISE_DT_0_V  0b0001
-#define SUNRISE_DT_1_V  0b0100
-#define SUNRISE_DT_C_V  0b0010
-
-// time delay after sunset (to be very sure that all chickens are back in..)
-// default - 30 - 0001 1110 - cksum: 1000
-#define SUNSET_DT_0_P   0b0101
-#define SUNSET_DT_1_P   0b0110
-#define SUNSET_DT_C_P   0b0111
-#define SUNSET_DT_0_V   0b0001
-#define SUNSET_DT_1_V   0b1110
-#define SUNSET_DT_C_V   0b1000
-
-#define DEBOUNCE_MS 20
-#define PULLUP false
-#define INVERT false
-
 #define MENU_COUNT 2
-
 
 volatile byte f_timer=0;
 
@@ -298,22 +258,11 @@ void setup() {
   // read eeprom settings (delays, ?)
   readEEPROM();
 
+  // Show splash (when in release mode..)
+#ifdef DEBUG_EN
+#else
   showSplash();
-
-  /* testing..
-  Serial.print("Date: ");
-  Serial.print(now.day());
-  Serial.print(" : ");
-  Serial.print(now.month(), DEC);
-  Serial.print(" : ");
-  Serial.print(now.year(), DEC);
-  Serial.print("\nTime: ");
-  Serial.print(now.hour(), DEC);
-  Serial.print(" : ");
-  Serial.print(now.minute(), DEC);
-  Serial.print(" : ");
-  Serial.print(now.second(), DEC);
-  Serial.print("\n"); */
+#endif
   
   // Initial time check to start things rolling..
   checkTime();
@@ -356,7 +305,7 @@ void openDoor(){
   lcd.setCursor(0, 0);
   lcd.print("Opening door");
   DEBUGLN("Opening the door..");
-  // send high to door open motor pin
+  // send high to door open motor pin (open the door)
   digitalWrite(PIN_DOOR_UP, HIGH);
 
   byte timeoutcount = 0;
@@ -381,7 +330,7 @@ void openDoor(){
   hit_top = true;
   DEBUGLN();
 
-  // send low to door open motor pin
+  // send low to door open motor pin (stop)
   digitalWrite(PIN_DOOR_UP, LOW);
 
   DEBUGLN("Door opened!!");
@@ -478,8 +427,9 @@ void waitForUserResetOpen(){
       pausedForUser = true;
     }
     tone(PIN_PIEZO, 2000, 50);
-    delay(50);
+    delay(400);
     tone(PIN_PIEZO, 2000, 50);
+    delay(400);
   }
 
   // if user wants to operate on door or something.. Leave door open/close (for a fair while)
