@@ -13,6 +13,7 @@
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
+#include <util/delay.h>
 
 #include <LiquidCrystal.h>
 #include <Wire.h>
@@ -31,6 +32,12 @@
 #define DELAY_MS 10
 #define MAX_DELAY_MINUTES 100
 #define DOOR_RETRY_SECONDS 10
+
+#define DOOR_ERR_BEEP_TIME 450
+#define DOOR_ERR_MSG1_TIME 2000
+#define DOOR_ERR_MSG2_TIME 4000
+#define DOOR_ERR_MSG3_TIME 7500
+#define DORR_ERR_PAUSE_TIME 30000
 
 // Pins
 #define PIN_ENC_A     7
@@ -299,6 +306,13 @@ void enterSleep() {
   power_all_enable();
 }
 
+void tensDigitLCD(byte digit){
+  if(digit / 10 < 1){
+    lcd.print('0');
+  }
+  lcd.print((int)digit);
+}
+
 // Opens the door (with timeout)
 void openDoor(){
   lcd.clear();
@@ -397,41 +411,127 @@ void updateDoor(){
 }
 
 // Alert user to press a button, otherwise the system will try to open/close the door to the proper position
-void waitForUserResetOpen(){
+
+/*
+ * |00|01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|  |00|01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|
+ * |E |r |r |o |r |! |  |D |o |o |r |  |n |o |t |  |  |E |r |r |o |r |! |  |D |o |o |r |  |n |o |t |  |
+ * |C |l |o |s |e |d |  |a |t |  |n |i |g |h |t |. |  |o |p |e |n |  |d |u |r |. |  |d |a |y |. |  |  |
+ * 
+ * |p |r |e |s |s |  |m |a |i |n |  |b |t |n |  |  |  |p |r |e |s |s |  |m |a |i |n |  |b |t |n |  |  |
+ * |t |o |  |p |r |e |v |e |n |t |  |f |r |o |m |- |  |t |o |  |p |r |e |v |e |n |t |  |f |r |o |m |- |
+ * 
+ * |a |u |t |o |- |o |p |e |n |i |n |g |  |i |n |  |  |a |u |t |o |- |c |l |o |s |i |n |g |  |i |n |  |
+ * |x |x |  |s |e |c |o |n |d |s |. |  |  |  |  |  |  |x |x |  |s |e |c |o |n |d |s |. |  |  |  |  |  |
+ * 
+ * |. |. | 
+ */
+
+void drawDoorErrMsg1(bool notClosed){
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Door will ");
-  if(is_day_time && hit_bottom){
-    lcd.print("open");
-  } else if(!is_day_time && hit_top){
-    lcd.print("close");
+  lcd.print("Error! Door not ");
+  lcd.setCursor(0, 1);
+  if(notClosed){
+    lcd.print("closed at night.");  
+  } else{
+    lcd.print("open dur. day.  ");
+  }
+}
+
+void drawDoorErrMsg2(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Press main btn  ");
+  lcd.setCursor(0, 1);
+  lcd.print("to prevent from-");
+}
+
+void drawDoorErrMsg3(bool notClosed, byte seconds){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  if(notClosed){
+    lcd.print("auto-closing in ");  
+  } else {
+    lcd.print("auto-opening in ");
   }
   lcd.setCursor(0, 1);
-  lcd.print("Unless press btn");
+  tensDigitLCD(seconds);
+  lcd.print(" seconds.");
+  
+}
+ 
+void waitForUserResetOpen(){
+
+  // determine time allowed for user to fix door before auto-fixing
+  bool notClosed = !is_day_time & hit_top;
   
   DateTime stopTime = rtc.now();
   DateTime fixTime;
   if(is_day_time && hit_bottom){
     fixTime = stopTime + TimeSpan(0, 0, 0, 6);
-  } else if(!is_day_time && hit_top){
+  } else if(notClosed){
     fixTime = stopTime + TimeSpan(0, 0, 0, 5);
   }
   
   bool pausedForUser = false;
+
+  bool beep1 = false;
+  bool msg1 = false;
+  bool msg2 = false;
+  bool msg3 = false;
+  bool msg_looped = false;
   
+  volatile int ms_count_beep = 0;
+  volatile int ms_count_msgs = 0;
+  volatile int ms_pause_time = 0;
+
   // while warning time not run out and user hasn't intervened
-  while(fixTime.unixtime() - rtc.now().unixtime() > 0 && !pausedForUser){
-    wdt_reset();
+  while((ms_pause_time < DORR_ERR_PAUSE_TIME) && !pausedForUser){
     menuButton.read();
     if(menuButton.wasReleased()){
       pausedForUser = true;
     }
-    tone(PIN_PIEZO, 2000, 50);
-    delay(400);
-    tone(PIN_PIEZO, 2000, 50);
-    delay(400);
+
+    if((ms_count_beep > DOOR_ERR_BEEP_TIME) && !beep1){
+      tone(PIN_PIEZO, 800, 50);  
+      beep1 = true;
+    } 
+    else if(ms_count_beep > DOOR_ERR_BEEP_TIME * 2 + 50){
+      tone(PIN_PIEZO, 2000, 50);  
+      beep1 = false;
+      ms_count_beep = 0;
+    }
+    
+    if(!msg1 && (ms_count_msgs > 0) && 
+        (ms_count_msgs < DOOR_ERR_MSG1_TIME)){
+      drawDoorErrMsg1(notClosed);
+      msg1 = true;
+    } 
+    else if(!msg2 && (ms_count_msgs > DOOR_ERR_MSG1_TIME) && 
+              (ms_count_msgs < DOOR_ERR_MSG2_TIME)){
+      drawDoorErrMsg2();
+      msg2 = true;
+    }
+    else if(!msg3 && (ms_count_msgs > DOOR_ERR_MSG2_TIME) && 
+              (ms_count_msgs < DOOR_ERR_MSG3_TIME)){
+      drawDoorErrMsg3(notClosed, (DORR_ERR_PAUSE_TIME - ms_pause_time) / 1000);
+      msg3 = true;
+    }
+    else if(ms_count_msgs > DOOR_ERR_MSG3_TIME){
+      ms_count_msgs = 0;   
+      msg1 = false;
+      msg2 = false;
+      msg3 = false;
+    }
+    
+    _delay_ms(10);
+    ms_count_beep += 10;
+    ms_count_msgs += 10;
+    ms_pause_time += 10;
+    wdt_reset();
   }
 
+  // TODO: fix this..
   // if user wants to operate on door or something.. Leave door open/close (for a fair while)
   if(pausedForUser){
     lcd.clear();
@@ -659,12 +759,7 @@ void checkTime(){
 
 }
 
-void tensDigitLCD(byte digit){
-  if(digit / 10 < 1){
-    lcd.print('0');
-  }
-  lcd.print((int)digit);
-}
+
 
 void updateLCD(){
  lcd.clear();
