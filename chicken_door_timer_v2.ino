@@ -22,7 +22,8 @@
 #include <TimeLord.h>
 #include "RTClib.h"
 #include "encoder.h"
-//#define DEBUG_EN
+//#define DEBUG_EN true
+#define ERR_EN true
 #include "main.h"
 
 #define LATITUDE -42.9166667
@@ -37,7 +38,10 @@
 #define DOOR_ERR_MSG1_TIME 2000
 #define DOOR_ERR_MSG2_TIME 4000
 #define DOOR_ERR_MSG3_TIME 7500
-#define DORR_ERR_PAUSE_TIME 30000
+#define DOOR_ERR_PAUSE_TIME 12500
+
+#define DOOR_MNTNC_TIME_DAYTIME 45 * 60000
+#define DOOR_MNTNC_TIME_NIGHTIME 35 * 60000
 
 // Pins
 #define PIN_ENC_A     7
@@ -239,6 +243,7 @@ void setup() {
 
   // setup serial
   Serial.begin(9600);
+  DEBUGLN("Serial initialised.");
 
   // setup LCD
   lcd.begin(16, 2);
@@ -486,7 +491,7 @@ void waitForUserResetOpen(){
   volatile int ms_pause_time = 0;
 
   // while warning time not run out and user hasn't intervened
-  while((ms_pause_time < DORR_ERR_PAUSE_TIME) && !pausedForUser){
+  while((ms_pause_time < DOOR_ERR_PAUSE_TIME) && !pausedForUser){
     menuButton.read();
     if(menuButton.wasReleased()){
       pausedForUser = true;
@@ -514,7 +519,7 @@ void waitForUserResetOpen(){
     }
     else if(!msg3 && (ms_count_msgs > DOOR_ERR_MSG2_TIME) && 
               (ms_count_msgs < DOOR_ERR_MSG3_TIME)){
-      drawDoorErrMsg3(notClosed, (DORR_ERR_PAUSE_TIME - ms_pause_time) / 1000);
+      drawDoorErrMsg3(notClosed, (DOOR_ERR_PAUSE_TIME - ms_pause_time) / 1000);
       msg3 = true;
     }
     else if(ms_count_msgs > DOOR_ERR_MSG3_TIME){
@@ -759,8 +764,6 @@ void checkTime(){
 
 }
 
-
-
 void updateLCD(){
  lcd.clear();
  tensDigitLCD(now.day());
@@ -880,7 +883,6 @@ inline void adjustTimeMins(char mins){
   DateTime adjusted(rtc.now() + TimeSpan(0, 0, mins, 0));
   rtc.adjust(adjusted);
 }
-
 
 // adjusting the time
 void adjustTimeLoop(){

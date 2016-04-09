@@ -32,7 +32,7 @@
   #define DEBUGLN(c) ;
 #endif
 
-#define ERR_EN
+
 #ifdef ERR_EN
   #define ERR(c) Serial.print(c);
   #define ERRLN(c) Serial.println(c);
