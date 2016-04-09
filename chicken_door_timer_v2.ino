@@ -89,6 +89,7 @@ bool is_day_time = false;
 bool door_open = false;
 bool in_options_menu = false;
 bool in_main_menu = false;
+bool in_timeset_menu = false;
 bool in_pre_delay_menu = false;
 bool in_post_delay_menu = false;
 bool in_time_adj_menu = false;
@@ -212,7 +213,7 @@ void setupPins(){
   pinMode(PIN_PIEZO, OUTPUT);
 }
 
-// LCD splash (Shouldn't be seen too much hopefully..)
+//LCD splash (Shouldn't be seen too much hopefully..)
 void showSplash(){
   // Splash to remind the user who made this!
   tone(PIN_PIEZO, 1000, 500);
@@ -311,6 +312,7 @@ void enterSleep() {
   power_all_enable();
 }
 
+// Draw a number on the lcd with a leding zero
 void tensDigitLCD(byte digit){
   if(digit / 10 < 1){
     lcd.print('0');
@@ -544,65 +546,66 @@ void waitForUserResetOpen(){
     lcd.print("Keeping door ");
     lcd.setCursor(0, 1);
     if(is_day_time && hit_bottom){
-      lcd.print("open");
+      lcd.print("open.");
     } else if(!is_day_time && hit_top){
-      lcd.print("close");
+      lcd.print("closed.");
     }
-    lcd.print("Press btn");
+    delay(1500);
 
-    // Calculate timeout - we can't pause indefinately just incase of user error!
-    stopTime = rtc.now();
-    bool timeOut = false;
-    
-    if(is_day_time && hit_bottom){
-      fixTime = stopTime + TimeSpan(0, 0, 50, 0);
-    } else if(!is_day_time && hit_top){
-      fixTime = stopTime + TimeSpan(0, 0, 30, 0);
-    }
+    const long int USER_FIX_TIME = 5 * 60000;
+    const int USER_FIX_LCD_UPDATE_TIME = 1000;
+
+    volatile long int fix_time_c = USER_FIX_TIME;
 
     // while waiting for user
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Waiting for user");
+    lcd.print("Paused for user");
     lcd.setCursor(0, 1);
-    lcd.print("intervention.");
-    
-    while(!timeOut && pausedForUser){
+    tensDigitLCD(((USER_FIX_TIME / 1000) / 60));
+    lcd.print(" mins remain.");
+
+    // while paused for user
+    while(pausedForUser){
       wdt_reset();
       menuButton.read();
+      // increase time if user pressed button
       if(menuButton.wasReleased()){
         pausedForUser = false;
       }
-      if(fixTime.unixtime() - rtc.now().unixtime() > 0){
-        timeOut = true;
+      // update LCD every 1 second
+      if(fix_time_c % USER_FIX_LCD_UPDATE_TIME == 0){
+        lcd.setCursor(0, 1);
+        tensDigitLCD(((fix_time_c / 1000) / 60));
+        lcd.print(":");
+        tensDigitLCD((fix_time_c / 1000) % 60);
+        lcd.print(" remains.");
       }
+      // if time <= 0 -- time has run out!
+      if(fix_time_c <= 0){
+        pausedForUser = false;
+      }
+      fix_time_c -= 50;
+      _delay_ms(50);
     }
 
-    // If user took way too long, we should carry on! (also could be some real-world issue, eg something knocked limit switch?)
-    if(timeOut){
-      tone(PIN_PIEZO, 2000, 50);
-      delay(50);
-      tone(PIN_PIEZO, 2000, 50);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Sorry! Have to");
-      lcd.setCursor(0, 1);
-      if(is_day_time && hit_bottom){
-        lcd.print("open");
-      } else if(!is_day_time && hit_top){
-        lcd.print("close");
-      }
-      lcd.print(" Door.");
-    } else {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      if(is_day_time && hit_bottom){
-        lcd.print("Opening");
-      } else if(!is_day_time && hit_top){
-        lcd.print("Closing");
-      }
-      lcd.print(" door");
+    // If user took way too long, we should carry on! 
+    // (also could be some real-world issue, eg something knocked limit switch?)
+    tone(PIN_PIEZO, 2000, 50);
+    delay(50);
+    tone(PIN_PIEZO, 2000, 50);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("About to");
+    lcd.setCursor(0, 1);
+    if(is_day_time && hit_bottom){
+      lcd.print("open");
+    } else if(!is_day_time && hit_top){
+      lcd.print("close");
     }
+    lcd.print(" Door.");
+
+    delay(1500);
   }
   // finally, open or close the door
   if(is_day_time && hit_bottom){
@@ -974,7 +977,6 @@ void drawSelectedMenu(){
       drawPostDelayMenu();
     } else {
       drawDelayOption();
-      //in_post_delay_menu = true;
     }
   }
 }
@@ -991,13 +993,13 @@ void updateSetupMenu(){
       menu_pos = (menu_pos - 1);
     }
     drawSelectedMenu();
-    DEBUG("Menu item: ");
-    DEBUGLN(menu_pos);
+    //DEBUG("Menu item: ");
+    //DEBUGLN(menu_pos);
   } else if (eState == ENC_INC) {
     tone(PIN_PIEZO, 400, 25);
     menu_pos = (menu_pos + 1) % (MENU_COUNT);
-    DEBUG("Menu item: ");
-    DEBUGLN(menu_pos);
+    //DEBUG("Menu item: ");
+    //DEBUGLN(menu_pos);
     drawSelectedMenu();
   }
 }
