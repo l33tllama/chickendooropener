@@ -24,6 +24,14 @@
 #define PULLUP false
 #define INVERT false
 
+#ifdef DEBUG_EN_S
+  #define DEBUGS(c) Serial.print(c);
+  #define DEBUGSLN(c) Serial.println(c);
+#else
+  #define DEBUGS(c) ;
+  #define DEBUGSLN(c) ;
+#endif
+
 #ifdef DEBUG_EN
   #define DEBUG(c) Serial.print(c);
   #define DEBUGLN(c) Serial.println(c);
