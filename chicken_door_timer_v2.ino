@@ -23,12 +23,14 @@
 #include "RTClib.h"
 #include "encoder.h"
 //#define DEBUG_EN true
+#define DEBUG_EN_S true
 #define ERR_EN true
 #include "main.h"
 
 #define LATITUDE -42.9166667
 #define LONGITUDE 147.3333282
 
+#define SERIAL_WAIT 6000
 #define TIMEOUT_MAX 220
 #define DELAY_MS 10
 #define MAX_DELAY_MINUTES 100
@@ -259,6 +261,8 @@ void setup() {
     ERRLN("RTC is not running! PANIC!");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
+  
+  //waitForSerialConnection();
 
   // Date testing using Datetime from RTC library
   now = rtc.now();
@@ -279,6 +283,8 @@ void setup() {
   
   // Initial time check to start things rolling..
   checkTime();
+
+  
 
   // enable watchdog timer
   wdt_enable(WDTO_4S);
@@ -310,6 +316,60 @@ void enterSleep() {
 
   /* Re-enable the peripherals. */
   power_all_enable();
+}
+
+
+// parse input from serial
+void parseInput(char * input){
+  DEBUGSLN("Entered: %s\n");
+  
+}
+
+// check for user input via serial
+// if user enters 'i' within allowed time, start accepting input commands
+void waitForSerialConnection(){
+  
+  volatile long int serial_wait_c = SERIAL_WAIT;
+  char * input_str = (char *) malloc(sizeof(char) * 32);
+  bool read_line = false;
+  bool accepting_input = false;
+  
+  Serial.print("Enter i to enter serial command mode.\n");
+  
+  while(serial_wait_c > 0 ){
+    while(Serial.available() > 0){
+      char in_c = Serial.read();
+      if (in_c == 'i'){
+	accepting_input = true;
+      }
+    }
+    _delay_ms(10);
+    serial_wait_c -= 10;
+  }
+  
+  if(serial_wait_c == 0 || !accepting_input){
+    Serial.print("Serial command mode timeout..\n");
+  }
+  
+  // if user entered 'i'
+  // TODO: add timeout for this, longer - eg 20-30 seconds
+  if(accepting_input){
+    while(!read_line){
+      char in_c;
+      while(Serial.available() > 0){
+	in_c = Serial.read();
+      }
+      
+      // if user pressed enter, finish up
+      if(in_c == '\n' || in_c == '\r'){
+	read_line = true;
+	parseInput(input_str);
+	break;
+      } else {
+	*(input_str)++ = Serial.read();
+      }
+    }
+  }
 }
 
 // Draw a number on the lcd with a leding zero
@@ -538,7 +598,6 @@ void waitForUserResetOpen(){
     wdt_reset();
   }
 
-  // TODO: fix this..
   // if user wants to operate on door or something.. Leave door open/close (for a fair while)
   if(pausedForUser){
     lcd.clear();
@@ -622,36 +681,38 @@ void waitForUserResetOpen(){
 void checkLimitSwitches(){
   // If daytime, only check if door has been manually or accidentally closed
   if(is_day_time){
-    DEBUGLN("Checking if door closed at daytime.");
+    DEBUGSLN("Checking if door closed at daytime.");
     // quickly power motor to check if door is hitting wrong limit switch
     // if down switch pressed and day time
     digitalWrite(PIN_DOOR_DN, HIGH);
+    delay(1);
     if(digitalRead(PIN_LIMSW_DN) == HIGH){
-      DEBUGLN("Hit bottom!");
+      DEBUGSLN("Hit bottom!");
       hit_bottom = true;
     }
-    delay(1);
     digitalWrite(PIN_DOOR_DN, LOW);
     digitalWrite(PIN_DOOR_UP, HIGH);
     delay(2);
     digitalWrite(PIN_DOOR_UP, LOW);
+    
     if(hit_bottom){
       waitForUserResetOpen();
     }
   } else {
-    DEBUGLN("Checking if door opened at night time.");
+    DEBUGSLN("Checking if door opened at night time.");
     
     // if up switch is pressed at day time
     digitalWrite(PIN_DOOR_UP, HIGH);
+    delay(1);
     if(digitalRead(PIN_LIMSW_UP) == HIGH){
       hit_top = true;
-      DEBUGLN("Hit bottom!");
+      DEBUGSLN("Hit bottom!");
     }
-    delay(1);
     digitalWrite(PIN_DOOR_UP, LOW);
     digitalWrite(PIN_DOOR_DN, HIGH);
     delay(2);
     digitalWrite(PIN_DOOR_DN, LOW);
+    
     if(hit_top){
       waitForUserResetOpen();
     }
