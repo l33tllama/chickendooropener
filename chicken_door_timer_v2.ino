@@ -262,7 +262,7 @@ void setup() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
   
-  //waitForSerialConnection();
+  waitForSerialConnection();
 
   // Date testing using Datetime from RTC library
   now = rtc.now();
@@ -278,7 +278,7 @@ void setup() {
   // Show splash (when in release mode..)
 #ifdef DEBUG_EN
 #else
-  showSplash();
+  //showSplash();
 #endif
   
   // Initial time check to start things rolling..
@@ -321,7 +321,9 @@ void enterSleep() {
 
 // parse input from serial
 void parseInput(char * input){
-  DEBUGSLN("Entered: %s\n");
+  DEBUGS("Entered:");
+  DEBUGS(input);
+  DEBUGSLN();
   
 }
 
@@ -330,45 +332,65 @@ void parseInput(char * input){
 void waitForSerialConnection(){
   
   volatile long int serial_wait_c = SERIAL_WAIT;
+  volatile long int serial_wait_c2 = SERIAL_WAIT * 3.5;
   char * input_str = (char *) malloc(sizeof(char) * 32);
   bool read_line = false;
   bool accepting_input = false;
+  char in_c;
   
   Serial.print("Enter i to enter serial command mode.\n");
-  
-  while(serial_wait_c > 0 ){
-    while(Serial.available() > 0){
-      char in_c = Serial.read();
-      if (in_c == 'i'){
-	accepting_input = true;
-      }
+  while(serial_wait_c > 0 && ! accepting_input) {
+    if(Serial.available() > 0){
+       in_c = Serial.read();
+        if (in_c == 'i'){
+          accepting_input = true;
+       }
     }
+    
     _delay_ms(10);
     serial_wait_c -= 10;
   }
   
   if(serial_wait_c == 0 || !accepting_input){
     Serial.print("Serial command mode timeout..\n");
-  }
-  
+  } 
+  bool entered_stuff = false;
+  byte str_i = 0;
+  const byte TIME_LEN = 20;
   // if user entered 'i'
   // TODO: add timeout for this, longer - eg 20-30 seconds
   if(accepting_input){
-    while(!read_line){
-      char in_c;
+    
+    Serial.print("Enter time:\n");
+    
+    while(serial_wait_c2 > 0 &&!read_line){
+
       while(Serial.available() > 0){
-	in_c = Serial.read();
+        if(str_i < TIME_LEN){
+          in_c = Serial.read();
+          input_str[str_i] = in_c;
+          str_i++;
+          input_str[str_i] = '\0';  
+        }
+        entered_stuff = true;
+      }
+      if(entered_stuff){
+        *(input_str)++ = '\0';
+        Serial.print(input_str);
+        entered_stuff = false;
+        str_i = 0;
+        read_line = true;
+        parseInput(input_str);
+        break;
       }
       
-      // if user pressed enter, finish up
-      if(in_c == '\n' || in_c == '\r'){
-	read_line = true;
-	parseInput(input_str);
-	break;
-      } else {
-	*(input_str)++ = Serial.read();
-      }
+      _delay_ms(10);
+      serial_wait_c2 -= 10;
     }
+   
+  }
+  if (!read_line){
+    Serial.print("Enter time timeout..\n");
   }
 }
 
